@@ -117,6 +117,46 @@ Self-hosted via Docker Compose (your infrastructure, your data) or SaaS (managed
 
 ---
 
+## Claude Code & Anthropic API
+
+CognOS Enterprise integrates with Anthropic in two directions.
+
+**Claude as LLM backend** — use any Claude model (Opus, Sonnet, Haiku) as the provider behind the trust-scoring gateway:
+
+```yaml
+# enterprise/config/provider.yaml
+provider: anthropic
+model: claude-sonnet-4-6
+api_key: ${ANTHROPIC_API_KEY}
+target_risk: 0.3
+fallback: ollama
+```
+
+**CognOS as MCP server for Claude Code** — expose trust verification as tools that Claude Code can call during its own reasoning:
+
+```json
+// ~/.claude/settings.json
+{
+  "mcpServers": {
+    "cognos": {
+      "command": "python",
+      "args": ["/path/to/Cognos-enterprise/mcp/server.py"],
+      "env": {
+        "COGNOS_BASE_URL": "http://127.0.0.1:8788",
+        "COGNOS_API_KEY": "your-key",
+        "COGNOS_TENANT": "your-tenant"
+      }
+    }
+  }
+}
+```
+
+Claude Code then has access to `verify_output`, `get_trace`, and `create_trust_report` as native tools — scoring its own outputs before acting on them.
+
+Full setup guide: [mcp/CLAUDE_CODE_SETUP.md](mcp/CLAUDE_CODE_SETUP.md)
+
+---
+
 ## Quickstart
 
 ```bash
