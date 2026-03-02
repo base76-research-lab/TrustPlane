@@ -1,0 +1,29 @@
+# CognOS Enterprise Gateway
+
+# Web framework
+fastapi>=0.115.0
+uvicorn[standard]>=0.30.0
+
+# HTTP client
+httpx>=0.27.0
+
+# Config
+pyyaml>=6.0
+
+# Database
+asyncpg>=0.29.0          # PostgreSQL async driver
+
+# Cache / rate limiting
+redis>=5.0.0
+
+# OSS core dependencies (proof-engine)
+# cognos-proof-engine is imported as local gateway/ module
+# cognos-session-memory integration via API
+# token-compressor integration via API
+
+# Optional: PDF export
+# reportlab>=4.0.0       # Uncomment to enable PDF audit reports
+
+# Optional: OAuth2/OIDC
+# python-jose[cryptography]>=3.3.0
+# authlib>=1.3.0

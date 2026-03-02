@@ -1,0 +1,66 @@
+services:
+  gateway:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8788:8788"
+    environment:
+      - DATABASE_URL=postgresql://cognos:cognos@postgres:5432/cognos
+      - REDIS_URL=redis://redis:6379/0
+      - COGNOS_USE_POSTGRES=true
+      - COGNOS_GATEWAY_API_KEY=${COGNOS_GATEWAY_API_KEY:-test-key}
+      - COGNOS_DEFAULT_TENANT=${COGNOS_DEFAULT_TENANT:-demo}
+      - COGNOS_PROVIDER=${COGNOS_PROVIDER:-ollama}
+      - COGNOS_MODEL=${COGNOS_MODEL:-llama3.2:1b}
+      - OLLAMA_HOST=${OLLAMA_HOST:-http://host.docker.internal:11434}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - GROQ_API_KEY=${GROQ_API_KEY:-}
+      - CEREBRAS_API_KEY=${CEREBRAS_API_KEY:-}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+
+  dashboard:
+    build:
+      context: ./dashboard
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    environment:
+      - NEXT_PUBLIC_GATEWAY_URL=http://localhost:8788
+      - COGNOS_API_KEY=${COGNOS_GATEWAY_API_KEY:-test-key}
+    depends_on:
+      - gateway
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: cognos
+      POSTGRES_PASSWORD: cognos
+      POSTGRES_DB: cognos
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U cognos"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    volumes:
+      - redis_data:/data
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  redis_data:

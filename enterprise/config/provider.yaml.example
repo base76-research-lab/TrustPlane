@@ -1,0 +1,31 @@
+# CognOS Enterprise — Tenant Provider Configuration
+# Copy to provider.yaml and adjust per tenant.
+
+# LLM provider: ollama | openai | anthropic | groq | cerebras
+provider: ollama
+
+# Model name (provider-specific)
+model: llama3.2:1b
+
+# API key or host (use env-var references with ${VAR_NAME})
+api_key: ${OLLAMA_HOST}
+
+# Optional: fallback provider if primary fails
+fallback: openai
+
+# Trust policy
+target_risk: 0.5          # 0.0 = strict, 1.0 = permissive
+
+# Rate limiting (Redis-backed)
+rate_limit: 1000/day      # requests per day per tenant
+
+# Webhook endpoint (optional) — called on ESCALATE or BLOCK
+webhook_url: ""           # https://your-system.example.com/cognos-events
+
+# Session memory integration
+session_memory_enabled: true
+session_memory_ttl: 86400  # seconds
+
+# Audit
+audit_enabled: true
+audit_retention_days: 90
