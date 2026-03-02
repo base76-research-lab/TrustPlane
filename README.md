@@ -6,7 +6,7 @@
 
 TrustPlane gives your legal and compliance team what they need to sign off on AI deployment: a documented risk policy, an immutable audit trail, and automatic escalation to human review when confidence drops.
 
-Built on [CognOS](https://github.com/base76-research-lab/cognos-proof-engine) — the open-source epistemic scoring engine from Base76 Research Lab.
+Powered by [CognOS](https://github.com/base76-research-lab/cognos-proof-engine) — an auditable epistemic risk engine with published theoretical foundations.
 
 ---
 
