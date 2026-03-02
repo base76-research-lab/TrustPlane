@@ -211,6 +211,8 @@ Designed for organizations operating high-risk AI systems under EU AI Act Annex 
 
 Full compliance guide: [docs/EU_AI_ACT.md](docs/EU_AI_ACT.md)
 
+→ [Technical whitepaper](docs/WHITEPAPER.md) — theory, implementation, limitations, EU AI Act mapping
+
 ## Use case scenarios
 
 Detailed deployment scenarios with architecture diagrams:
