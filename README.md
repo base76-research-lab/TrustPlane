@@ -1,48 +1,47 @@
 # CognOS Enterprise
 
-**Your LLM doesn't know when to stop. Now it does.**
+**The AI Trust Control Plane for production LLM systems.**
 
-CognOS Enterprise is a trust-scoring gateway that sits between your application and any LLM — measuring epistemic uncertainty on every request, blocking what shouldn't pass, and giving you a full audit trail for every decision it makes.
+CognOS Enterprise intercepts every LLM request, scores it for epistemic uncertainty, and enforces your risk policy before the response reaches your users. Every decision is logged, auditable, and EU AI Act compliant.
 
-Built for teams that can't afford to guess.
-
----
-
-## The problem
-
-You're running AI in production. Somewhere between "it works in the demo" and "it's live for 10,000 users", something will go wrong. A model will hallucinate a medical dosage. A legal assistant will cite a case that doesn't exist. A customer-facing bot will say something it shouldn't.
-
-You won't know until after.
+Built for organizations where AI failures have consequences.
 
 ---
 
-## The solution
+## Why this exists
 
-Every request through CognOS is scored before it reaches your users:
+AI failures in production are not edge cases. They are a category of operational risk that most teams have no infrastructure to detect, prevent, or document.
+
+A model hallucinating a medical dosage. A legal assistant citing a case that doesn't exist. A financial assistant giving advice it has no basis for. These are not hypothetical — they happen every day, silently, in systems that have no visibility layer between the LLM and the user.
+
+The cost of an AI failure is not the API call. It is liability, compliance exposure, reputational damage, and in regulated industries, regulatory action.
+
+CognOS Enterprise is the control plane that sits between your application and any LLM, measuring uncertainty before trust is granted.
+
+---
+
+## How it works
+
+Every request is scored using the epistemic trust formula:
 
 ```
 C = p × (1 − Ue − Ua)
 ```
 
-Where `Ue` is epistemic uncertainty (what the model doesn't know) and `Ua` is aleatoric uncertainty (what nobody can know). When the score drops below your threshold, the request is escalated — or blocked entirely.
+- `p` — prior confidence in the model for this request type
+- `Ue` — epistemic uncertainty (reducible: what the model doesn't know)
+- `Ua` — aleatoric uncertainty (irreducible: noise inherent in the domain)
 
-Four outcomes. No surprises.
+The result is a trust score between 0 and 1. Your policy determines what happens next.
 
-| Score | Decision | What happens |
+| Trust score | Decision | Action |
 |---|---|---|
-| High confidence | `PASS` | Request goes through |
-| Borderline | `REFINE` | Warning headers attached |
-| Low confidence | `ESCALATE` | Webhook fired, human notified |
-| Unacceptable | `BLOCK` | Request rejected, trace saved |
+| Above threshold | `PASS` | Request forwarded |
+| Threshold − 0.2 | `REFINE` | Warning headers, logged |
+| Threshold − 0.4 | `ESCALATE` | Webhook triggered, human notified |
+| Below minimum | `BLOCK` | Request rejected, trace saved |
 
-Every decision is logged. Every log is exportable. Every export is EU AI Act compliant.
-
----
-
-## Features
-
-### Trust scoring on every request
-Drop-in replacement for your existing LLM calls. Same API shape, same models — with epistemic headers on every response.
+Every response carries the decision in its headers:
 
 ```
 X-Cognos-Trust-Score: 0.8731
@@ -51,30 +50,48 @@ X-Cognos-Trace-Id: tr_a3f91c2d44b1
 X-Cognos-Policy: enterprise_v1
 ```
 
-### Plug in any LLM
-One gateway. Every provider.
+---
+
+## Evidence base
+
+The trust-scoring model is not a heuristic. It is grounded in epistemic theory and validated through empirical work published at [Base76 Research Lab](https://github.com/base76-research-lab).
+
+**OSS core:** [cognos-proof-engine](https://github.com/base76-research-lab/cognos-proof-engine) — the scoring engine is open source, auditable, and independently verifiable. The formula, the decision thresholds, and the policy engine are all inspectable.
+
+**Published research:** The Field-Node-Cockpit (FNC) framework underlying the model has been through peer review. See [Applied AI Philosophy](https://github.com/Applied-Ai-Philosophy) for the full publication record.
+
+**Falsifiability:** The threshold model makes testable predictions. A system calibrated to `target_risk: 0.3` should escalate measurably more than one set to `0.7`. This is testable, loggable, and reportable — which is the point.
+
+If your compliance team, security team, or legal counsel needs to understand how the scoring works, there is source code and published theory to show them.
+
+---
+
+## Capabilities
+
+### Pluggable LLM backend
+One control plane. Every provider. Switch without changing application code.
 
 ```yaml
-provider: ollama          # Local, private, free
+provider: ollama          # On-premise, air-gapped
 provider: openai          # GPT-4o, o1, o3
 provider: anthropic       # Claude 3.5, Claude 4
-provider: groq            # llama3, mixtral at 500+ tok/s
-provider: cerebras        # Fastest inference on earth
+provider: groq            # High-throughput inference
+provider: cerebras        # Low-latency inference
 ```
 
-Switch providers without changing your application code. Configure fallback providers for zero-downtime failover.
+Fallback providers configurable for zero-downtime failover.
 
 ### Multi-tenant isolation
-Every tenant gets their own PostgreSQL schema. No data bleeds between customers. Ever.
+PostgreSQL schema-per-tenant. No data shared between organizations.
 
 ```
 tenant_acme.traces
 tenant_globocorp.traces
-tenant_startupxyz.traces
+tenant_healthsystem.traces
 ```
 
-### Webhooks on ESCALATE and BLOCK
-Your systems know the moment something goes wrong — before your users do.
+### Human oversight triggers
+Webhook dispatch on ESCALATE and BLOCK. Your incident management system receives the signal before your users receive the response.
 
 ```json
 {
@@ -86,35 +103,28 @@ Your systems know the moment something goes wrong — before your users do.
 }
 ```
 
-### EU AI Act compliance, built in
-Article 13 transparency reports generated automatically. Export to PDF or CSV on demand.
+### Audit trail
+Complete trace history for every request. Exportable as CSV or EU AI Act Article 13 PDF report.
 
 ```bash
 curl -H "X-API-Key: your-key" \
-  "https://your-gateway/v1/audit/export?format=pdf" \
-  -o eu_ai_act_report.pdf
+  "https://your-gateway/v1/audit/export?format=pdf&from=2026-01-01" \
+  -o compliance_report.pdf
 ```
 
-### Self-hosted or SaaS
-Run it on your own infrastructure with Docker Compose, or use our hosted version. Your data never has to leave your environment.
+### Deployment options
+Self-hosted via Docker Compose (your infrastructure, your data) or SaaS (managed, zero-ops).
 
 ---
 
 ## Quickstart
 
 ```bash
-# Clone
 git clone https://github.com/base76-research-lab/Cognos-enterprise.git
 cd Cognos-enterprise
-
-# Configure
-cp .env.example .env
-# Set COGNOS_PROVIDER, COGNOS_MODEL, your API key
-
-# Start
+cp .env.example .env        # Set provider + API key
 docker-compose up
 
-# Test
 curl -X POST http://localhost:8788/v1/chat/completions \
   -H "X-API-Key: test-key" \
   -H "X-Cognos-Tenant: demo" \
@@ -122,26 +132,66 @@ curl -X POST http://localhost:8788/v1/chat/completions \
   -d '{"model":"ollama/llama3.2:1b","messages":[{"role":"user","content":"Hello"}]}'
 ```
 
-That's it. Your LLM now has a conscience.
-
 ---
 
 ## Architecture
 
 ```
-Your App
-   │
-   ▼
-CognOS Enterprise Gateway   ←── trust scoring, RBAC, rate limiting
-   │                             tenant isolation, webhooks, audit
-   ├── Ollama (local)
-   ├── OpenAI
-   ├── Anthropic
-   ├── Groq
-   └── Cerebras
+Your Application
+       │
+       ▼
+CognOS Enterprise          — trust scoring, policy enforcement
+       │                   — RBAC, rate limiting, audit logging
+       │                   — webhook dispatch, tenant isolation
+       │
+       ├── Ollama           (on-premise)
+       ├── OpenAI
+       ├── Anthropic
+       ├── Groq
+       └── Cerebras
+
+PostgreSQL                 — per-tenant audit trail
+Redis                      — rate limiting
+Dashboard (Next.js)        — visibility layer
 ```
 
-The gateway is stateless. PostgreSQL holds the audit trail. Redis handles rate limiting. The dashboard gives you visibility into all of it.
+---
+
+## EU AI Act compliance
+
+CognOS Enterprise is designed for organizations operating AI systems classified as high-risk under EU AI Act Annex III.
+
+| Article | Requirement | How CognOS addresses it |
+|---|---|---|
+| Art. 9 | Risk management system | Continuous epistemic scoring on every inference |
+| Art. 12 | Record-keeping | Immutable trace log with trace IDs and timestamps |
+| Art. 13 | Transparency | Automated PDF reports with full attestation summary |
+| Art. 14 | Human oversight | Webhook escalation before downstream consequences |
+
+Full compliance guide: [docs/EU_AI_ACT.md](docs/EU_AI_ACT.md)
+
+---
+
+## Pricing
+
+### Free
+Open-source core. 1 tenant. 100 requests/day. CSV export.
+Sufficient for evaluation and development.
+[→ cognos-proof-engine](https://github.com/base76-research-lab/cognos-proof-engine)
+
+### SaaS — from €499/month per tenant
+Hosted. Zero infrastructure. Full enterprise feature set.
+Suitable for teams that want to deploy quickly without managing infrastructure.
+
+### Self-hosted license — from €25,000/year
+Run CognOS on your own infrastructure. Full source access. Air-gap compatible.
+Suitable for regulated industries, government, and organizations with data residency requirements.
+
+### Enterprise consulting bundle
+Architecture review, policy calibration, compliance documentation, and ongoing support.
+Suitable for organizations deploying AI in high-risk domains (healthcare, legal, finance, public sector).
+
+Contact: [bjorn@base76.se](mailto:bjorn@base76.se)
 
 ---
 
@@ -162,48 +212,16 @@ The gateway is stateless. PostgreSQL holds the audit trail. Redis handles rate l
 | Token compression | ✗ | ✓ |
 | SLA + support | ✗ | ✓ |
 
-Start free. Upgrade when you need it.
-
----
-
-## Compliance
-
-CognOS Enterprise is designed for teams operating under **EU AI Act** requirements for high-risk AI systems (Annex III).
-
-- **Article 9** — Continuous risk management via epistemic scoring on every inference
-- **Article 12** — Complete record-keeping with trace IDs, timestamps, and decision logs
-- **Article 13** — Automated transparency reports (PDF) covering all attestations
-- **Article 14** — Human oversight via webhook escalation before consequences occur
-
-Full guide: [docs/EU_AI_ACT.md](docs/EU_AI_ACT.md)
-
 ---
 
 ## Built on open source
 
-CognOS Enterprise is built on top of **[cognos-proof-engine](https://github.com/base76-research-lab/cognos-proof-engine)** — the open-source trust-scoring core. The proof engine handles the math. The enterprise layer handles everything else.
+Enterprise is the production layer on top of [cognos-proof-engine](https://github.com/base76-research-lab/cognos-proof-engine) (MIT). The scoring engine is open and auditable. The enterprise layer adds multi-tenancy, auth, webhooks, audit exports, and commercial support.
 
-Related projects:
-- [cognos-session-memory](https://github.com/base76-research-lab/cognos-session-memory) — Verified context injection via epistemic trust scoring
-- [token-compressor](https://github.com/base76-research-lab/token-compressor) — Context compression for long-running sessions
-- [cognos-risk-dashboard](https://github.com/base76-research-lab/cognos-risk-dashboard) — Visual trust monitoring (included in this repo)
-
----
-
-## Research
-
-The trust-scoring model is grounded in **Field-Node-Cockpit (FNC)** theory — a framework for observable, coherent, and ethically bounded autonomous AI systems, developed at [Base76 Research Lab](https://base76.se).
-
-Published: [Applied AI Philosophy](https://github.com/Applied-Ai-Philosophy)
+Related:
+- [cognos-session-memory](https://github.com/base76-research-lab/cognos-session-memory) — Verified context injection
+- [token-compressor](https://github.com/base76-research-lab/token-compressor) — Context compression for long sessions
 
 ---
 
-## License
-
-Enterprise edition — contact [bjorn@base76.se](mailto:bjorn@base76.se) for licensing.
-
-OSS core: [cognos-proof-engine](https://github.com/base76-research-lab/cognos-proof-engine) (MIT)
-
----
-
-*Built by [Base76 Research Lab](https://base76.se), Sjöbo, Sweden.*
+*[Base76 Research Lab](https://base76.se) — Sjöbo, Sweden*
