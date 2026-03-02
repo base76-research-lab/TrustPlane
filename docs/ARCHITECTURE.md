@@ -1,0 +1,133 @@
+# TrustPlane — Architecture
+
+## System overview
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                      Your Application                        │
+│           (web app, agent, automation, API client)           │
+└─────────────────────────┬───────────────────────────────────┘
+                          │  POST /v1/chat/completions
+                          │  X-API-Key: ...
+                          │  X-TrustPlane-Tenant: acme
+                          ▼
+┌─────────────────────────────────────────────────────────────┐
+│                       TrustPlane                             │
+│                                                              │
+│  ┌─────────────┐   ┌──────────────┐   ┌──────────────────┐  │
+│  │   Auth &    │   │    Trust     │   │   Policy         │  │
+│  │   RBAC      │──▶│   Scoring    │──▶│   Enforcement    │  │
+│  │             │   │  C=p(1−Ue−Ua)│   │  PASS/REFINE/    │  │
+│  └─────────────┘   └──────────────┘   │  ESCALATE/BLOCK  │  │
+│                                        └────────┬─────────┘  │
+│  ┌─────────────┐   ┌──────────────┐            │            │
+│  │   Rate      │   │   Tenant     │            │            │
+│  │   Limiting  │   │   Isolation  │            │            │
+│  │   (Redis)   │   │  (per-schema)│            │            │
+│  └─────────────┘   └──────────────┘            │            │
+│                                                 │            │
+│  ┌──────────────────────────────────────────────▼─────────┐  │
+│  │                  Provider Router                        │  │
+│  └──┬──────────┬──────────┬──────────┬──────────┬────────┘  │
+│     │          │          │          │          │            │
+└─────┼──────────┼──────────┼──────────┼──────────┼───────────┘
+      │          │          │          │          │
+      ▼          ▼          ▼          ▼          ▼
+   Ollama     OpenAI    Anthropic    Groq     Cerebras
+ (on-prem)   (cloud)    (cloud)   (cloud)   (cloud)
+```
+
+## Decision flow
+
+```
+Incoming request
+      │
+      ▼
+┌─────────────┐
+│  Auth check │  ── fail ──▶  401 Unauthorized
+└──────┬──────┘
+       │ pass
+       ▼
+┌─────────────┐
+│  Rate limit │  ── exceeded ──▶  429 Too Many Requests
+└──────┬──────┘
+       │ ok
+       ▼
+┌──────────────────────────┐
+│   Trust scoring          │
+│   C = p × (1 − Ue − Ua) │
+└──────┬───────────────────┘
+       │
+       ├── C ≥ threshold ──────────────────▶  PASS
+       │                                       │
+       ├── C ≥ threshold − 0.2 ────────────▶  REFINE
+       │                                       │
+       ├── C ≥ threshold − 0.4 ────────────▶  ESCALATE ──▶ Webhook
+       │                                       │
+       └── C < threshold − 0.4 ────────────▶  BLOCK
+                                               │
+                          ┌────────────────────┘
+                          ▼
+                    Route to LLM provider
+                          │
+                          ▼
+                    Return response
+                    + epistemic headers
+                          │
+                          ▼
+                    Write to audit log
+                    (PostgreSQL, per-tenant schema)
+```
+
+## Deployment: Self-hosted / Air-gapped
+
+```
+┌──────────────────────────────────────────────────────┐
+│                  Air-gapped environment               │
+│                                                      │
+│  ┌─────────────┐   ┌──────────────┐   ┌──────────┐  │
+│  │  TrustPlane │   │  PostgreSQL  │   │  Redis   │  │
+│  │  Gateway    │──▶│  Audit DB    │   │  Rate    │  │
+│  │  :8788      │   │  :5432       │   │  Limiter │  │
+│  └──────┬──────┘   └──────────────┘   └──────────┘  │
+│         │                                            │
+│         ▼                                            │
+│  ┌─────────────┐   ┌──────────────┐                  │
+│  │  Dashboard  │   │  Ollama      │                  │
+│  │  :3000      │   │  (local LLM) │                  │
+│  └─────────────┘   └──────────────┘                  │
+│                                                      │
+│  No external network access required                 │
+│  Audit trail integrity: physical isolation           │
+└──────────────────────────────────────────────────────┘
+```
+
+In an air-gapped deployment, audit trail integrity is enforced through physical and network isolation rather than cryptographic controls. This satisfies the record-keeping requirements of EU AI Act Article 12 for sovereign and regulated deployments — the same model used in defense, healthcare, and public sector infrastructure worldwide.
+
+## Deployment: SaaS / Multi-tenant
+
+```
+┌─────────────────────────────────────────────────────────┐
+│                    TrustPlane SaaS                       │
+│                                                         │
+│   tenant_acme schema        tenant_globocorp schema     │
+│  ┌──────────────────┐      ┌──────────────────────┐    │
+│  │ traces           │      │ traces               │    │
+│  │ policies         │      │ policies             │    │
+│  │ webhooks         │      │ webhooks             │    │
+│  └──────────────────┘      └──────────────────────┘    │
+│                                                         │
+│   PostgreSQL schema isolation — no data shared          │
+└─────────────────────────────────────────────────────────┘
+```
+
+## Component responsibilities
+
+| Component | Technology | Responsibility |
+|---|---|---|
+| Gateway | FastAPI (Python) | Request interception, trust scoring, routing |
+| Trust Engine | CognOS (OSS) | Epistemic scoring: `C = p × (1 − Ue − Ua)` |
+| Audit DB | PostgreSQL | Per-tenant trace storage, compliance export |
+| Rate Limiter | Redis | Token bucket, per-tenant limits |
+| Dashboard | Next.js | Visibility layer, trace inspection |
+| MCP Server | Python | Claude Code integration |

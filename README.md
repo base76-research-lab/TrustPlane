@@ -110,8 +110,10 @@ curl -H "X-API-Key: your-key" \
   -o compliance_report.pdf
 ```
 
+In air-gapped deployments, audit trail integrity is enforced through physical and network isolation — the same model used in defense, healthcare, and public sector infrastructure. No external process can reach the database. For deployments requiring additional guarantees, WAL archiving to write-once storage can be added above TrustPlane.
+
 ### Deployment options
-Self-hosted via Docker Compose or SaaS. Your data never has to leave your environment.
+Self-hosted via Docker Compose (air-gap compatible) or SaaS. Your data never has to leave your environment.
 
 ---
 
@@ -169,23 +171,30 @@ curl -X POST http://localhost:8788/v1/chat/completions \
 ## Architecture
 
 ```
-Your Application
-       │
-       ▼
-TrustPlane                 — trust scoring, policy enforcement
-       │                   — RBAC, rate limiting, audit logging
-       │                   — webhook dispatch, tenant isolation
-       │
-       ├── Ollama           (on-premise)
-       ├── OpenAI
-       ├── Anthropic
-       ├── Groq
-       └── Cerebras
-
-PostgreSQL                 — per-tenant audit trail
-Redis                      — rate limiting
-Dashboard (Next.js)        — visibility layer
+┌─────────────────────────────────────────────────────┐
+│                  Your Application                    │
+└─────────────────────────┬───────────────────────────┘
+                          │
+                          ▼
+┌─────────────────────────────────────────────────────┐
+│                    TrustPlane                        │
+│                                                     │
+│   Auth & RBAC  →  Trust Scoring  →  Policy Engine   │
+│                   C=p(1−Ue−Ua)     PASS/REFINE/     │
+│                                    ESCALATE/BLOCK    │
+│                                         │           │
+│   Rate Limiting    Tenant Isolation     │           │
+│   (Redis)          (per-schema PG)      │           │
+│                                         ▼           │
+│              ┌──────────────────────────────────┐   │
+│              │         Provider Router           │   │
+│              └───┬──────┬──────┬──────┬─────────┘   │
+└──────────────────┼──────┼──────┼──────┼─────────────┘
+                   │      │      │      │
+                Ollama  OpenAI  Anthropic  Groq/Cerebras
 ```
+
+Full diagram: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
 
 ---
 
@@ -201,6 +210,14 @@ Designed for organizations operating high-risk AI systems under EU AI Act Annex 
 | Art. 14 | Human oversight | Webhook escalation before downstream consequences |
 
 Full compliance guide: [docs/EU_AI_ACT.md](docs/EU_AI_ACT.md)
+
+## Use case scenarios
+
+Detailed deployment scenarios with architecture diagrams:
+
+- [Healthcare AI with automatic escalation](docs/scenarios/healthcare.md) — Clinical documentation, air-gapped Ollama, strict `target_risk: 0.05`
+- [Legal AI with compliance audit trail](docs/scenarios/legal.md) — Contract analysis, Anthropic backend, 7-year retention
+- [Public sector sovereign deployment](docs/scenarios/public-sector.md) — Air-gapped, national data sovereignty, full EU AI Act mapping
 
 ---
 
