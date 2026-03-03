@@ -24,6 +24,7 @@ from enterprise.providers.registry import get_provider
 from enterprise.tenants.router import (
     ensure_tenant_schema, save_trace, get_traces,
     save_report, get_reports, get_report, get_report_pdf,
+    override_trace, purge_expired_traces,
 )
 from enterprise.webhooks.dispatcher import dispatch, build_payload
 from enterprise.audit.exporter import export_csv, export_pdf
@@ -54,6 +55,9 @@ async def on_startup() -> None:
             await ensure_tenant_schema(demo_tenant)
         except Exception as exc:
             print(f"[WARN] PostgreSQL not available, falling back to SQLite: {exc}")
+        else:
+            # Schedule daily retention purge in background
+            asyncio.create_task(_retention_purge_loop(demo_tenant))
     else:
         # SQLite fallback for development
         import sys
@@ -414,10 +418,71 @@ async def get_report_pdf_endpoint(report_id: str, auth: AuthDep) -> Response:
 
 
 # ---------------------------------------------------------------------------
+# Human oversight — trace override (Art. 14)
+# ---------------------------------------------------------------------------
+
+class OverrideRequest(BaseModel):
+    reason: str
+
+
+@app.post("/v1/traces/{trace_id}/override")
+async def override_trace_endpoint(
+    trace_id: str,
+    req: OverrideRequest,
+    auth: AuthDep,
+) -> dict[str, Any]:
+    """
+    Mark a BLOCK or ESCALATE trace as human-reviewed and approved.
+    Records who overrode it, when, and the stated reason.
+    Required for EU AI Act Art. 14 human oversight compliance.
+    """
+    auth.require_role("admin", "auditor")
+    if not req.reason or len(req.reason.strip()) < 5:
+        raise HTTPException(status_code=400, detail="reason must be at least 5 characters")
+
+    if _USE_POSTGRES:
+        updated = await override_trace(
+            auth.tenant_id,
+            trace_id,
+            override_by=auth.role + ":" + auth.api_key[-6:],
+            reason=req.reason.strip(),
+        )
+        if not updated:
+            raise HTTPException(
+                status_code=404,
+                detail="Trace not found, not BLOCK/ESCALATE, or already overridden",
+            )
+    else:
+        # SQLite mode — no override support, log a warning
+        print(f"[WARN] Override requested for {trace_id} but SQLite mode has no override support")
+        updated = False
+
+    return {
+        "trace_id": trace_id,
+        "overridden": updated,
+        "override_by": auth.role,
+        "message": "Trace marked as human-reviewed" if updated else "SQLite mode — override not persisted",
+    }
+
+
+# ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
 
 import asyncio
+
+
+async def _retention_purge_loop(tenant_id: str) -> None:
+    """Daily background task: purge expired traces for the given tenant."""
+    _PURGE_INTERVAL = int(os.getenv("COGNOS_PURGE_INTERVAL_HOURS", "24")) * 3600
+    while True:
+        await asyncio.sleep(_PURGE_INTERVAL)
+        try:
+            deleted = await purge_expired_traces(tenant_id)
+            if deleted:
+                print(f"[INFO] Retention purge: removed {deleted} expired traces for tenant '{tenant_id}'")
+        except Exception as exc:
+            print(f"[WARN] Retention purge failed for tenant '{tenant_id}': {exc}")
 
 
 def _save_trace_bg(
@@ -439,7 +504,9 @@ def _save_trace_bg(
         "metadata": {},
     }
     if _USE_POSTGRES:
-        asyncio.create_task(save_trace(tenant_id, record))
+        cfg = load_provider_config(tenant_id)
+        retention_days = max(180, int(cfg.get("audit_retention_days", 180)))
+        asyncio.create_task(save_trace(tenant_id, record, retention_days=retention_days))
     else:
         import sys
         sys.path.insert(0, "gateway")

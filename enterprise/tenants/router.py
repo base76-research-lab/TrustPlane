@@ -48,14 +48,37 @@ async def ensure_tenant_schema(tenant_id: str) -> None:
                 request_fp      JSONB,
                 response_fp     JSONB,
                 envelope        JSONB,
-                metadata        JSONB
+                metadata        JSONB,
+                expires_at      TIMESTAMPTZ,
+                overridden      BOOLEAN NOT NULL DEFAULT false,
+                override_by     TEXT,
+                override_at     TIMESTAMPTZ,
+                override_reason TEXT
             )
         """)
+        # Add new columns to existing tables (idempotent migrations)
+        for col, definition in [
+            ("expires_at",      "TIMESTAMPTZ"),
+            ("overridden",      "BOOLEAN NOT NULL DEFAULT false"),
+            ("override_by",     "TEXT"),
+            ("override_at",     "TIMESTAMPTZ"),
+            ("override_reason", "TEXT"),
+        ]:
+            try:
+                await conn.execute(
+                    f'ALTER TABLE "{schema}".traces ADD COLUMN IF NOT EXISTS {col} {definition}'
+                )
+            except Exception:
+                pass  # column already exists or DB doesn't support IF NOT EXISTS
     finally:
         await conn.close()
 
 
-async def save_trace(tenant_id: str, record: dict[str, Any]) -> None:
+async def save_trace(
+    tenant_id: str,
+    record: dict[str, Any],
+    retention_days: int = 180,
+) -> None:
     schema = _schema(tenant_id)
     conn = await get_connection()
     try:
@@ -63,8 +86,10 @@ async def save_trace(tenant_id: str, record: dict[str, Any]) -> None:
             f"""
             INSERT INTO "{schema}".traces
               (trace_id, created_at, decision, policy, trust_score, risk,
-               is_stream, status_code, model, request_fp, response_fp, envelope, metadata)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, $11::jsonb, $12::jsonb, $13::jsonb)
+               is_stream, status_code, model, request_fp, response_fp, envelope, metadata,
+               expires_at)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, $11::jsonb, $12::jsonb, $13::jsonb,
+                    $2::timestamptz + ($14 || ' days')::interval)
             ON CONFLICT (trace_id) DO NOTHING
             """,
             record["trace_id"],
@@ -80,7 +105,67 @@ async def save_trace(tenant_id: str, record: dict[str, Any]) -> None:
             _json(record.get("response_fingerprint")),
             _json(record.get("envelope")),
             _json(record.get("metadata")),
+            str(retention_days),
         )
+    finally:
+        await conn.close()
+
+
+async def override_trace(
+    tenant_id: str,
+    trace_id: str,
+    override_by: str,
+    reason: str,
+) -> bool:
+    """
+    Mark a BLOCK or ESCALATE trace as human-reviewed and approved (overridden).
+    Returns True if the trace was found and updated, False otherwise.
+    """
+    schema = _schema(tenant_id)
+    conn = await get_connection()
+    try:
+        result = await conn.execute(
+            f"""
+            UPDATE "{schema}".traces
+            SET overridden = true,
+                override_by = $2,
+                override_at = now(),
+                override_reason = $3
+            WHERE trace_id = $1
+              AND decision IN ('BLOCK', 'ESCALATE')
+              AND overridden = false
+            """,
+            trace_id,
+            override_by,
+            reason,
+        )
+        return result == "UPDATE 1"
+    finally:
+        await conn.close()
+
+
+async def purge_expired_traces(tenant_id: str) -> int:
+    """
+    Delete traces whose expires_at is in the past.
+    Returns the number of deleted rows.
+    Art. 12: deployers must retain logs for at least 6 months (180 days).
+    Purge only removes traces beyond the configured retention window.
+    """
+    schema = _schema(tenant_id)
+    conn = await get_connection()
+    try:
+        result = await conn.execute(
+            f"""
+            DELETE FROM "{schema}".traces
+            WHERE expires_at IS NOT NULL
+              AND expires_at < now()
+            """,
+        )
+        # asyncpg returns e.g. "DELETE 42"
+        try:
+            return int(result.split()[-1])
+        except (ValueError, IndexError):
+            return 0
     finally:
         await conn.close()
 
