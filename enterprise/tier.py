@@ -27,6 +27,8 @@ FREE_LIMITS = {
     "webhook_max_endpoints": 1,
     "webhook_max_events_per_day": 100,
     "audit_pdf": False,
+    "compliance_report_json": True,
+    "compliance_report_pdf": False,
     "multi_tenant": False,
     "fallback_provider": False,
     "session_memory": False,

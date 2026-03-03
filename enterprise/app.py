@@ -21,9 +21,13 @@ from enterprise.auth.middleware import AuthDep, generate_api_key, register_api_k
 from enterprise.auth.rate_limit import check_rate_limit
 from enterprise.config.loader import load_provider_config
 from enterprise.providers.registry import get_provider
-from enterprise.tenants.router import ensure_tenant_schema, save_trace, get_traces
+from enterprise.tenants.router import (
+    ensure_tenant_schema, save_trace, get_traces,
+    save_report, get_reports, get_report, get_report_pdf,
+)
 from enterprise.webhooks.dispatcher import dispatch, build_payload
 from enterprise.audit.exporter import export_csv, export_pdf
+from enterprise.audit.compliance_report import build_compliance_report, render_pdf as render_compliance_pdf
 from enterprise.tier import enforce, enforce_tenant_count, get_effective_rate_limit, tier_info
 
 app = FastAPI(
@@ -266,6 +270,147 @@ async def get_trace_endpoint(trace_id: str, auth: AuthDep) -> dict[str, Any]:
     if match is None:
         raise HTTPException(status_code=404, detail="Trace not found")
     return match
+
+
+# ---------------------------------------------------------------------------
+# Compliance reports
+# ---------------------------------------------------------------------------
+
+class ComplianceReportRequest(BaseModel):
+    from_ts: str = "2026-01-01"
+    to_ts: str = "2099-12-31"
+    format: str = "json"  # "json" | "pdf"
+
+    class Config:
+        # Allow "from" as alias since it's a Python keyword
+        populate_by_name = True
+
+    @classmethod
+    def from_alias(cls, data: dict) -> "ComplianceReportRequest":
+        mapped = dict(data)
+        if "from" in mapped:
+            mapped["from_ts"] = mapped.pop("from")
+        if "to" in mapped:
+            mapped["to_ts"] = mapped.pop("to")
+        return cls(**mapped)
+
+
+@app.post("/v1/audit/compliance-report")
+async def compliance_report_endpoint(
+    request: Request,
+    auth: AuthDep,
+) -> Response:
+    auth.require_role("admin", "auditor")
+
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid JSON body")
+
+    from_ts = body.get("from", body.get("from_ts", "2026-01-01"))
+    to_ts = body.get("to", body.get("to_ts", "2099-12-31"))
+    fmt = body.get("format", "json").lower()
+
+    if fmt == "pdf":
+        enforce("compliance_report_pdf")
+    else:
+        enforce("compliance_report_json")
+
+    if _USE_POSTGRES:
+        traces = await get_traces(auth.tenant_id, from_ts=from_ts, to_ts=to_ts)
+    else:
+        traces = _get_sqlite_traces(from_ts, to_ts)
+
+    report = build_compliance_report(traces, auth.tenant_id, from_ts, to_ts)
+
+    # Persist report (best-effort)
+    if _USE_POSTGRES:
+        try:
+            await ensure_tenant_schema(auth.tenant_id)
+            summary = report.to_dict()
+            # Store top-50 traces sample in raw_stats for PDF appendix
+            summary["raw_stats"]["_traces_sample"] = traces[:50]
+            pdf_bytes = render_compliance_pdf(report, auth.tenant_id) if fmt == "pdf" else None
+            await save_report(
+                auth.tenant_id,
+                report.report_id,
+                from_ts,
+                to_ts,
+                report.overall_risk_level,
+                summary,
+                pdf_bytes,
+            )
+        except Exception as exc:
+            print(f"[WARN] Could not persist compliance report: {exc}")
+
+    if fmt == "pdf":
+        # Inject traces sample for PDF appendix
+        report.raw_stats["_traces_sample"] = traces[:50]
+        pdf_bytes = render_compliance_pdf(report, auth.tenant_id)
+        return Response(
+            content=pdf_bytes,
+            media_type="application/pdf",
+            headers={
+                "Content-Disposition": (
+                    f"attachment; filename=compliance_{auth.tenant_id}_{report.report_id}.pdf"
+                )
+            },
+        )
+
+    report_dict = report.to_dict()
+    report_dict.pop("raw_stats", None)  # keep JSON response clean; raw_stats in separate field
+    report_dict["raw_stats"] = {
+        k: v for k, v in report.raw_stats.items() if k != "_traces_sample"
+    }
+    return JSONResponse(content=report_dict)
+
+
+@app.get("/v1/reports/")
+async def list_reports(auth: AuthDep) -> list[dict]:
+    auth.require_role("admin", "auditor")
+    if not _USE_POSTGRES:
+        return []
+    rows = await get_reports(auth.tenant_id)
+    # Serialise datetime objects
+    result = []
+    for r in rows:
+        row = dict(r)
+        for k, v in row.items():
+            if hasattr(v, "isoformat"):
+                row[k] = v.isoformat()
+        result.append(row)
+    return result
+
+
+@app.get("/v1/reports/{report_id}")
+async def get_report_endpoint(report_id: str, auth: AuthDep) -> dict[str, Any]:
+    auth.require_role("admin", "auditor")
+    if not _USE_POSTGRES:
+        raise HTTPException(status_code=404, detail="Report not found (SQLite mode)")
+    row = await get_report(auth.tenant_id, report_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Report not found")
+    result = dict(row)
+    for k, v in result.items():
+        if hasattr(v, "isoformat"):
+            result[k] = v.isoformat()
+    return result
+
+
+@app.get("/v1/reports/{report_id}/pdf")
+async def get_report_pdf_endpoint(report_id: str, auth: AuthDep) -> Response:
+    auth.require_role("admin", "auditor")
+    enforce("compliance_report_pdf")
+    if not _USE_POSTGRES:
+        raise HTTPException(status_code=404, detail="Report not found (SQLite mode)")
+    pdf = await get_report_pdf(auth.tenant_id, report_id)
+    if pdf is None:
+        raise HTTPException(status_code=404, detail="PDF not found for this report")
+    return Response(
+        content=pdf,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f"attachment; filename={report_id}.pdf"},
+    )
 
 
 # ---------------------------------------------------------------------------

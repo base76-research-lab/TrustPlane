@@ -24,6 +24,17 @@ async def ensure_tenant_schema(tenant_id: str) -> None:
     try:
         await conn.execute(f'CREATE SCHEMA IF NOT EXISTS "{schema}"')
         await conn.execute(f"""
+            CREATE TABLE IF NOT EXISTS "{schema}".reports (
+                report_id   TEXT PRIMARY KEY,
+                created_at  TIMESTAMPTZ DEFAULT now(),
+                period_from TIMESTAMPTZ,
+                period_to   TIMESTAMPTZ,
+                risk_level  TEXT,
+                summary_json JSONB,
+                pdf_blob    BYTEA
+            )
+        """)
+        await conn.execute(f"""
             CREATE TABLE IF NOT EXISTS "{schema}".traces (
                 trace_id        TEXT PRIMARY KEY,
                 created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -94,6 +105,87 @@ async def get_traces(
         query += f" ORDER BY created_at DESC LIMIT {limit}"
         rows = await conn.fetch(query, *args)
         return [dict(r) for r in rows]
+    finally:
+        await conn.close()
+
+
+async def save_report(
+    tenant_id: str,
+    report_id: str,
+    period_from: str,
+    period_to: str,
+    risk_level: str,
+    summary_json: dict,
+    pdf_blob: bytes | None = None,
+) -> None:
+    schema = _schema(tenant_id)
+    conn = await get_connection()
+    try:
+        await conn.execute(
+            f"""
+            INSERT INTO "{schema}".reports
+              (report_id, period_from, period_to, risk_level, summary_json, pdf_blob)
+            VALUES ($1, $2, $3, $4, $5::jsonb, $6)
+            ON CONFLICT (report_id) DO NOTHING
+            """,
+            report_id,
+            period_from,
+            period_to,
+            risk_level,
+            _json(summary_json),
+            pdf_blob,
+        )
+    finally:
+        await conn.close()
+
+
+async def get_reports(tenant_id: str) -> list[dict[str, Any]]:
+    schema = _schema(tenant_id)
+    conn = await get_connection()
+    try:
+        rows = await conn.fetch(
+            f"""
+            SELECT report_id, created_at, period_from, period_to, risk_level
+            FROM "{schema}".reports
+            ORDER BY created_at DESC
+            LIMIT 200
+            """
+        )
+        return [dict(r) for r in rows]
+    except Exception:
+        return []
+    finally:
+        await conn.close()
+
+
+async def get_report(tenant_id: str, report_id: str) -> dict[str, Any] | None:
+    schema = _schema(tenant_id)
+    conn = await get_connection()
+    try:
+        row = await conn.fetchrow(
+            f"""
+            SELECT report_id, created_at, period_from, period_to, risk_level, summary_json
+            FROM "{schema}".reports
+            WHERE report_id = $1
+            """,
+            report_id,
+        )
+        return dict(row) if row else None
+    finally:
+        await conn.close()
+
+
+async def get_report_pdf(tenant_id: str, report_id: str) -> bytes | None:
+    schema = _schema(tenant_id)
+    conn = await get_connection()
+    try:
+        row = await conn.fetchrow(
+            f'SELECT pdf_blob FROM "{schema}".reports WHERE report_id = $1',
+            report_id,
+        )
+        if row is None:
+            return None
+        return bytes(row["pdf_blob"]) if row["pdf_blob"] else None
     finally:
         await conn.close()
 
