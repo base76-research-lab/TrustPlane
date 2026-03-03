@@ -215,6 +215,21 @@ Full compliance guide: [docs/EU_AI_ACT.md](docs/EU_AI_ACT.md)
 
 → [Technical whitepaper](docs/WHITEPAPER.md) — theory, implementation, limitations, EU AI Act mapping
 
+---
+
+## Licensing
+
+TrustPlane is available for licensing to organisations and consultancies that need to deploy EU AI Act compliance infrastructure without building from scratch.
+
+Three models available:
+- **Single organisation** — deploy internally, own the infrastructure
+- **Reseller / consultancy** — white-label for client deployments
+- **Research / pilot partnership** — co-develop for a specific domain (healthcare, finance, public sector)
+
+→ [licensing/LICENSE_OFFER.md](licensing/LICENSE_OFFER.md) — full terms and pricing
+
+Contact: [bjorn@base76.se](mailto:bjorn@base76.se)
+
 ## Use case scenarios
 
 Detailed deployment scenarios with architecture diagrams:
