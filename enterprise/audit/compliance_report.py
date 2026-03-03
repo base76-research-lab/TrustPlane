@@ -219,6 +219,46 @@ def _traces_exceeding(traces: list[dict], signal: str, threshold: float, compare
 
 
 # ---------------------------------------------------------------------------
+# Mandate helpers
+# ---------------------------------------------------------------------------
+
+def _extract_mandate(trace: dict) -> dict | None:
+    """Return the mandate object from a trace envelope, if present."""
+    envelope = trace.get("envelope") or {}
+    if isinstance(envelope, str):
+        try:
+            envelope = json.loads(envelope)
+        except Exception:
+            return None
+    cognos = envelope.get("cognos") or {}
+    return cognos.get("mandate") or None
+
+
+def _mandate_coverage_stats(traces: list[dict]) -> dict:
+    with_m, without_m, _ = _mandate_coverage(traces)
+    total = len(traces)
+    return {
+        "with_mandate": with_m,
+        "without_mandate": without_m,
+        "coverage_rate": round(with_m / total, 4) if total else 0.0,
+    }
+
+
+def _mandate_coverage(traces: list[dict]) -> tuple[int, int, list[str]]:
+    """
+    Returns (traces_with_mandate, traces_without_mandate, trace_ids_without).
+    """
+    with_mandate = 0
+    without_ids: list[str] = []
+    for t in traces:
+        if _extract_mandate(t):
+            with_mandate += 1
+        else:
+            without_ids.append(t.get("trace_id", ""))
+    return with_mandate, len(without_ids), without_ids
+
+
+# ---------------------------------------------------------------------------
 # Core functions
 # ---------------------------------------------------------------------------
 
@@ -266,6 +306,32 @@ def analyze_risk_areas(traces: list[dict]) -> list[RiskArea]:
             article_refs=cfg["article_refs"],
             explanation=explanation,
             recommendation=cfg["recommendation"],
+        ))
+
+    # --- Decision Mandate Coverage (Art. 9) ---
+    with_mandate, without_count, without_ids = _mandate_coverage(traces)
+    total = len(traces)
+    missing_rate = without_count / total if total else 0.0
+
+    if missing_rate > 0.5:
+        mandate_severity = "high" if missing_rate > 0.8 else "medium"
+        areas.append(RiskArea(
+            name="Decision Mandate Coverage",
+            severity=mandate_severity,
+            affected_traces=without_ids,
+            article_refs=["Art. 9"],
+            explanation=(
+                f"{missing_rate:.1%} of requests in this period ({without_count}/{total}) "
+                f"were made without a documented decision mandate. A mandate captures which "
+                f"alternatives were considered, what uncertainty was accepted, and who held "
+                f"the authorisation — forming the epistemic audit trail required under Art. 9."
+            ),
+            recommendation=(
+                "Add a 'mandate' object to the 'cognos' field of your API requests: "
+                "alternatives_considered, uncertainty_accepted, authorized_by, decision_context. "
+                "This does not change system behaviour — it documents the organisational decision "
+                "context that preceded the AI invocation."
+            ),
         ))
 
     return areas
@@ -334,6 +400,7 @@ def build_compliance_report(
             "decision_breakdown": breakdown,
             "avg_trust_score": round(avg_trust, 4),
             "total_traces": len(traces),
+            "mandate_coverage": _mandate_coverage_stats(traces),
         },
     )
 

@@ -6,6 +6,32 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 
+class DecisionMandate(BaseModel):
+    """
+    Optional structured decision context attached to an AI request.
+    Documents the epistemic state of the organisation at the moment of AI invocation.
+    Stored in the trace envelope for Art. 9 audit trail purposes.
+    """
+    model_config = ConfigDict(extra="allow")
+
+    alternatives_considered: list[str] = Field(
+        default_factory=list,
+        description="Other approaches evaluated before choosing AI",
+    )
+    uncertainty_accepted: str | None = Field(
+        default=None,
+        description="Explicit statement of known limitations or uncertainty accepted",
+    )
+    authorized_by: str | None = Field(
+        default=None,
+        description="Role or person who holds the decision mandate",
+    )
+    decision_context: str | None = Field(
+        default=None,
+        description="Free-text description of the decision situation",
+    )
+
+
 class CognosControl(BaseModel):
     mode: Literal["monitor", "enforce"] = "monitor"
     policy_id: str = "default_v1"
@@ -13,6 +39,10 @@ class CognosControl(BaseModel):
     shadow_pct: float = Field(default=0.0, ge=0.0, le=1.0)
     shadow_models: list[str] = Field(default_factory=list)
     retention: Literal["none", "fingerprints", "enhanced"] = "fingerprints"
+    mandate: DecisionMandate | None = Field(
+        default=None,
+        description="Optional decision mandate — documents alternatives, uncertainty, and authorisation",
+    )
 
 
 class ChatMessage(BaseModel):

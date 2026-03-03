@@ -45,6 +45,7 @@ TrustPlane is a pluggable LLM (Large Language Model) trust-scoring gateway desig
 | 0.9.0 | 2026-02 | Initial release: gateway, audit CSV/PDF export |
 | 1.0.0 | 2026-03-03 | Compliance report feature, EU AI Act Article mapping, reports API |
 | 1.1.0 | 2026-03-03 | Art. 14 override endpoint, Art. 12 retention enforcement, Art. 73 incident register |
+| 1.2.0 | 2026-03-03 | DecisionMandate object in CognosControl; mandate coverage risk area (Art. 9) |
 
 ### 1.4 Risk Classification Assessment
 
@@ -178,6 +179,28 @@ When an LLM provider supports it, the `CognosEnvelope` carries a `SignalVector` 
 | `citation_density` | Source citation strength | Low = poor verifiability |
 | `contradiction` | Internal logical contradiction | High = inconsistent output |
 | `out_of_distribution` | OOD detection score | Input unlike training distribution |
+
+### 2.6 Decision Mandate (Art. 9)
+
+An optional `DecisionMandate` object can be included in the `cognos` field of any request. It documents the organisational decision context at the moment of AI invocation — not what the AI does, but why the organisation chose to invoke it.
+
+```json
+{
+  "cognos": {
+    "policy_id": "hr_screening_v2",
+    "mandate": {
+      "alternatives_considered": ["manual review", "rule-based filter"],
+      "uncertainty_accepted": "model may miss edge cases in junior roles",
+      "authorized_by": "head_of_hr",
+      "decision_context": "Q1 2026 recruitment batch — 120 candidates"
+    }
+  }
+}
+```
+
+The mandate is stored in the trace envelope and analysed in the compliance report. If more than 50% of traces in a period lack a mandate, a **Decision Mandate Coverage** risk area is flagged under Art. 9. The `raw_stats.mandate_coverage` field in every report shows coverage rate across the period.
+
+**No system behaviour is changed by the presence or absence of a mandate.** It is purely an audit record.
 
 These signals feed the compliance report risk-area analysis in `enterprise/audit/compliance_report.py`.
 
