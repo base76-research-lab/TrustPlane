@@ -3,10 +3,10 @@
 
 | Field | Value |
 |-------|-------|
-| Document version | 1.0.0 |
+| Document version | 1.1.0 |
 | Date | 2026-03-03 |
 | Provider | Base76 Research Lab, Sjöbo, Sweden |
-| System | TrustPlane v1.0.0 |
+| System | TrustPlane v1.1.0 |
 | QMS owner | Björn Wikström |
 | Next review | 2026-06-01 |
 
@@ -105,13 +105,13 @@ A release is considered validated when:
 - Compliance report generation tested with synthetic trace data covering all 6 signal dimensions
 - `TECHNICAL_DOCUMENTATION.md` reflects the release state
 
-### 4.3 Known test gaps (v1.0.0)
+### 4.3 Known test gaps (v1.1.0)
 
 - No adversarial input testing
 - No bias evaluation
 - No load testing under multi-tenant concurrent access
 
-These are documented in `TECHNICAL_DOCUMENTATION.md §2.6` and scheduled for v1.1.0.
+These are documented in `TECHNICAL_DOCUMENTATION.md §2.6` and scheduled for v1.2.0.
 
 ---
 
@@ -136,8 +136,9 @@ The FastAPI application exposes interactive API documentation at `/docs` (Swagge
 
 | Data category | Where stored | Retention | Access control |
 |--------------|-------------|---------|---------------|
-| Audit traces (decision, trust_score, model, timestamp) | PostgreSQL `tenant_{id}.traces` | 90 days default; min 6 months per Art. 12 | auditor, admin roles |
-| Request envelope (full request/response JSON) | PostgreSQL `envelope` JSONB column | Same as above | admin role |
+| Audit traces (decision, trust_score, model, timestamp, override data) | PostgreSQL `tenant_{id}.traces` | Min 180 days enforced in code; `expires_at` set per trace | auditor, admin roles |
+| Request envelope (full request/response JSON) | PostgreSQL `envelope` JSONB column | Same as traces | admin role |
+| Human override records (override_by, override_at, override_reason) | PostgreSQL `tenant_{id}.traces` — same row | Same as traces | auditor, admin roles |
 | Compliance reports (JSON + PDF) | PostgreSQL `tenant_{id}.reports` | Indefinite until manual deletion | auditor, admin roles |
 | API keys | In-process store (env-seeded) | Session lifetime | admin only |
 
@@ -199,18 +200,20 @@ The compliance report engine (`enterprise/audit/compliance_report.py`) is the pr
 3. If Critical: containment action within 24 hours
 4. Tenant notified within 48 hours
 5. If personal data or fundamental rights impact: report to **IMY** (Integritetsskyddsmyndigheten, Sweden) within 15 days
-6. Root cause analysis documented in internal incident register
+6. Root cause analysis documented in `docs/incidents/` using `TEMPLATE.md`
 7. Corrective action implemented and verified
 8. `TECHNICAL_DOCUMENTATION.md` §9.2 updated with incident summary
 
 ### 9.3 Incident register
 
-Incidents are logged in `/docs/incidents/` (created on first incident). Each entry includes:
-- Date, classification, description
-- Affected tenants
-- Root cause
-- Corrective action
-- Resolution date
+Incidents are logged in `docs/incidents/` — one file per incident named `YYYY-MM-DD-<slug>.md`. The register index is maintained in `docs/incidents/README.md`.
+
+Each entry (per `docs/incidents/TEMPLATE.md`) includes:
+- Incident ID, date, class, affected tenants
+- IMY report status
+- Description, impact, root cause
+- Containment and corrective actions with owners and target dates
+- Lessons learned
 
 ---
 
@@ -265,7 +268,7 @@ Competence requirements for QMS owner:
 | Provider / QMS owner | Overall compliance, documentation, incident response | Björn Wikström, Base76 Research Lab |
 | Deployer (tenant admin) | Correct deployment configuration, human oversight designation, 6-month log retention | Tenant's designated admin |
 | Deployer (tenant auditor) | Monthly compliance report review, escalation review | Tenant's designated auditor |
-| Human oversight officer | Review ESCALATE/BLOCK events, approve or override | Named per deployment by tenant |
+| Human oversight officer | Review ESCALATE/BLOCK events; use `POST /v1/traces/{id}/override` to document approval with mandatory reason | Named per deployment by tenant |
 
 Deployers accept accountability for their deployment configuration upon API key issuance. Base76 Research Lab provides the infrastructure and documentation; the deployer is responsible for its contextual use.
 
