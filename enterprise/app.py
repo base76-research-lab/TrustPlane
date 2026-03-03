@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import FastAPI, HTTPException, Request, Response
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
 
@@ -35,6 +36,19 @@ app = FastAPI(
     title="TrustPlane Gateway",
     version="1.0.0",
     description="Pluggable LLM trust-scoring gateway with multi-tenant isolation",
+)
+
+_CORS_ORIGINS = os.getenv(
+    "TRUSTPLANE_CORS_ORIGINS",
+    "http://localhost:3000,http://localhost:3001"
+).split(",")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=_CORS_ORIGINS,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 _USE_POSTGRES = os.getenv("COGNOS_USE_POSTGRES", "true").lower() in {"1", "true", "yes"}
